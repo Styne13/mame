@@ -47,7 +47,7 @@ ___| XTAL  80C31          +KEYPAD+       |__
 #include "screen.h"
 #include "servicetastatur.h"
 
-#include "servicetastatur.lh"
+#include "servicet.lh"
 
 namespace {
 
@@ -430,4 +430,4 @@ void adp_servicet_device::device_add_mconfig(machine_config &config)
 	m_lcd->set_lcd_size(2, 40);
 }
 
-GAMEL( 1992, servicet, 0, servicet, servicet, servicet_state, empty_init, ROT0, "ADP", u8"Merkur Service Testgerät", MACHINE_NOT_WORKING | MACHINE_NO_SOUND_HW, layout_servicetastatur )
+GAMEL( 1992, servicet, 0, servicet, servicet, servicet_state, empty_init, ROT0, "ADP", u8"Merkur Service Testgerät", MACHINE_NOT_WORKING | MACHINE_NO_SOUND_HW, layout_servicet )
