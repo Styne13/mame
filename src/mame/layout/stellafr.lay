@@ -32,9 +32,9 @@ license:CC0-1.0
 	</element>
 
 	<view name="Internal Layout">
-		<bounds left="0" right="110" top="0" bottom="50" />
+		<bounds left="0" right="110" top="0" bottom="65" />
 		<element ref="static_black">
-			<bounds left="0" right="110" top="0" bottom="50" />
+			<bounds left="0" right="110" top="0" bottom="65" />
 		</element>
 
 <!-- left panel -->
@@ -88,6 +88,10 @@ license:CC0-1.0
 			</repeat>
 		</repeat>
 
+		<!-- Service Keyboard LCD Screen (for debugging) -->
+		<screen tag="kbd:screen">
+			<bounds x="5" y="50" width="100" height="10" />
+		</screen>
 
 	</view>
 </mamelayout>

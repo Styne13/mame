@@ -91,12 +91,18 @@ Connectors:
 
 #include "emu.h"
 #include "cpu/m68000/m68000.h"
+#include "cpu/mcs51/i80c51.h"
 #include "machine/mc68681.h"
 #include "machine/msm6242.h"
 #include "machine/nvram.h"
+#include "machine/i2cmem.h"
 #include "sound/ay8910.h"
 #include "sound/dac.h"
+#include "video/hd44780.h"
 #include "speaker.h"
+#include "screen.h"
+#include "emupal.h"
+#include "servicetastatur.h"
 
 //#define VERBOSE 1
 #include "logmacro.h"
@@ -189,6 +195,10 @@ enum
 	U10_LI2
 };
 
+//**************************************************************************
+//  STELLAFR_STATE - device implementation
+//**************************************************************************
+
 class stellafr_state : public driver_device
 {
 public:
@@ -201,7 +211,9 @@ public:
 		m_digits(*this, "digit%u", 0U),
 		m_lamps(*this, "lamp%u", 0U),
 		m_leds(*this, "led%u", 0U),
-		m_in0(*this, "IN0")
+		m_in0(*this, "IN0"),
+		m_kbd(*this, "kbd"),
+		m_kbd_cpu(*this, "kbd:maincpu")
 	{ }
 
 	void sus_tk(machine_config &config);
@@ -219,6 +231,8 @@ private:
 	output_finder<128> m_lamps;
 	output_finder<2> m_leds;
 	required_ioport m_in0;
+	required_device<adp_servicet_device> m_kbd;
+	required_device<mcs51_cpu_device> m_kbd_cpu;
 
 	uint8_t m_ma1;
 	uint8_t m_ma2;
@@ -229,7 +243,13 @@ private:
 	uint8_t m_anz2;
 	uint8_t m_mux2;
 
+	// Boot delay timer - keyboard boots faster than machine
+	emu_timer *m_kbd_boot_timer;
+	int m_kbd_data_out;   // cached keyboard data-out bit
+	int m_kbd_enable;     // previous enable state for edge detection
+
 	uint8_t mux_r();
+	TIMER_CALLBACK_MEMBER(release_kbd_reset);
 	void mux_w(uint8_t data);
 	void mux2_w(uint8_t data);
 	void duart_output_w(uint8_t data);
@@ -379,13 +399,39 @@ void stellafr_state::machine_start()
 	m_digits.resolve();
 	m_lamps.resolve();
 	m_leds.resolve();
+
+	m_kbd_data_out = 0;
+	m_kbd_enable = 0;
+
+	// Create boot delay timer
+	m_kbd_boot_timer = timer_alloc(FUNC(stellafr_state::release_kbd_reset), this);
+
 	save_item(NAME(m_mux1));
+	save_item(NAME(m_kbd_data_out));
+	save_item(NAME(m_kbd_enable));
 }
 
 void stellafr_state::machine_reset()
 {
 	m_mux1 = 0;
+
+	m_kbd_data_out = 0;
+	m_kbd_enable = 0;
+
+	// Hold keyboard in reset for 10 seconds to let main machine fully boot
+	m_kbd_cpu->set_input_line(INPUT_LINE_RESET, ASSERT_LINE);
+	m_kbd_boot_timer->adjust(attotime::from_msec(10000));
+	LOG("Keyboard held in reset, will release after 10 seconds\n");
 }
+
+TIMER_CALLBACK_MEMBER(stellafr_state::release_kbd_reset)
+{
+	LOG("Releasing keyboard from reset - machine should be initialized\n");
+	m_kbd_cpu->set_input_line(INPUT_LINE_RESET, CLEAR_LINE);
+}
+
+//**************************************************************************
+//  INPUT PORTS
 
 static INPUT_PORTS_START( stellafr )
 	PORT_START("IN0")
@@ -416,6 +462,9 @@ void stellafr_state::sus_tk(machine_config &config)
 	aysnd.add_route(ALL_OUTPUTS, "mono", 0.85);
 	aysnd.port_a_read_callback().set_ioport("IN0");
 	aysnd.port_b_write_callback().set(FUNC(stellafr_state::ay8910_portb_w));
+
+	// Add service keyboard for debugging
+	ADP_SERVICET(config, "kbd", XTAL(11'059'200));
 }
 
 void stellafr_state::sus_rtc(machine_config &config)
@@ -439,7 +488,12 @@ void stellafr_state::sus_rtc(machine_config &config)
 	aysnd.add_route(ALL_OUTPUTS, "mono", 0.85);
 	aysnd.port_a_read_callback().set_ioport("IN0");
 	aysnd.port_b_write_callback().set(FUNC(stellafr_state::ay8910_portb_w));
+
+	// Add service keyboard for debugging
+	ADP_SERVICET(config, "kbd", XTAL(11'059'200));
 }
+
+} // anonymous namespace
 
 ROM_START( action )
 	ROM_REGION( 0x20000, "maincpu", 0 )
@@ -648,7 +702,10 @@ ROM_START( turbosun )
 	ROM_LOAD16_BYTE( "turbo_sunny_f1_ii.u6", 0x00001, 0x20000, CRC(4d431ae3) SHA1(bb5ff763b9bbaf4eb15ec3fde643b601421fbde1) )
 ROM_END
 
-} // anonymous namespace
+// anonymous namespace
+
+// device type declaration
+DECLARE_DEVICE_TYPE(ADP_SERVICET, adp_servicet_device)
 
 GAMEL(1993, action,   0,        sus_tk, stellafr, stellafr_state, empty_init, ROT0, "ADP",    "Action",                MACHINE_NOT_WORKING | MACHINE_MECHANICAL | MACHINE_REQUIRES_ARTWORK, layout_stellafr )
 GAMEL(1993, disc4000, 0,        sus_tk, stellafr, stellafr_state, empty_init, ROT0, "ADP",    "Disc 4000",             MACHINE_NOT_WORKING | MACHINE_MECHANICAL | MACHINE_REQUIRES_ARTWORK, layout_stellafr )
