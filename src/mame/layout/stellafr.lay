@@ -31,40 +31,89 @@ license:CC0-1.0
 		</led7seg>
 	</element>
 
-	<view name="Internal Layout">
-		<bounds left="0" right="110" top="0" bottom="50" />
+	<group name="machine">
 		<element ref="static_black">
 			<bounds left="0" right="110" top="0" bottom="50" />
 		</element>
 
-<!-- left panel -->
-		<!-- Sonderspiele -->
-		<element name="digit7" ref="digit">
-			<bounds x="10" y="10" width="10" height="15" />
+<!-- Anzeigenplatine chains: digit<anzout><field> (0 = 150er, 3 = Serienspeicher, 5 = Muenzspeicher); the four fields run 2,0,3,1 from left to right -->
+		<element name="digit00" ref="digit">
+			<bounds x="20" y="1" width="8" height="8" />
 		</element>
-		<element name="digit6" ref="digit">
-			<bounds x="20" y="10" width="10" height="15" />
+		<element name="digit01" ref="digit">
+			<bounds x="40" y="1" width="8" height="8" />
 		</element>
-		<element name="digit5" ref="digit">
-			<bounds x="30" y="10" width="10" height="15" />
+		<element name="digit02" ref="digit">
+			<bounds x="10" y="1" width="8" height="8" />
+		</element>
+		<element name="digit03" ref="digit">
+			<bounds x="30" y="1" width="8" height="8" />
 		</element>
 
-<!-- right panel -->
-		<!-- Münzspeicher -->
-		<element name="digit4" ref="digit">
-			<bounds x="50" y="10" width="10" height="15" />
+		<element name="digit30" ref="digit">
+			<bounds x="20" y="10" width="8" height="8" />
 		</element>
-		<element name="digit3" ref="digit">
-			<bounds x="60" y="10" width="10" height="15" />
+		<element name="digit31" ref="digit">
+			<bounds x="40" y="10" width="8" height="8" />
 		</element>
-		<element name="digit2" ref="digit">
-			<bounds x="70" y="10" width="10" height="15" />
+		<element name="digit32" ref="digit">
+			<bounds x="10" y="10" width="8" height="8" />
 		</element>
-		<element name="digit1" ref="digit">
-			<bounds x="80" y="10" width="10" height="10" />
+		<element name="digit33" ref="digit">
+			<bounds x="30" y="10" width="8" height="8" />
 		</element>
-		<element name="digit0" ref="digit">
-			<bounds x="90" y="10" width="10" height="10" />
+
+		<element name="digit50" ref="digit">
+			<bounds x="20" y="19" width="8" height="8" />
+		</element>
+		<element name="digit51" ref="digit">
+			<bounds x="40" y="19" width="8" height="8" />
+		</element>
+		<element name="digit52" ref="digit">
+			<bounds x="10" y="19" width="8" height="8" />
+		</element>
+		<element name="digit53" ref="digit">
+			<bounds x="30" y="19" width="8" height="8" />
+		</element>
+
+<!-- second Anzeigenplatine (ANZ2): digit<80+anzout*10+field> -->
+		<element name="digit80" ref="digit">
+			<bounds x="70" y="1" width="8" height="8" />
+		</element>
+		<element name="digit81" ref="digit">
+			<bounds x="90" y="1" width="8" height="8" />
+		</element>
+		<element name="digit82" ref="digit">
+			<bounds x="60" y="1" width="8" height="8" />
+		</element>
+		<element name="digit83" ref="digit">
+			<bounds x="80" y="1" width="8" height="8" />
+		</element>
+
+		<element name="digit110" ref="digit">
+			<bounds x="70" y="10" width="8" height="8" />
+		</element>
+		<element name="digit111" ref="digit">
+			<bounds x="90" y="10" width="8" height="8" />
+		</element>
+		<element name="digit112" ref="digit">
+			<bounds x="60" y="10" width="8" height="8" />
+		</element>
+		<element name="digit113" ref="digit">
+			<bounds x="80" y="10" width="8" height="8" />
+		</element>
+
+		<element name="digit130" ref="digit">
+			<bounds x="70" y="19" width="8" height="8" />
+		</element>
+		<element name="digit131" ref="digit">
+			<bounds x="90" y="19" width="8" height="8" />
+		</element>
+		<element name="digit132" ref="digit">
+			<bounds x="60" y="19" width="8" height="8" />
+		</element>
+		<element name="digit133" ref="digit">
+			<bounds x="80" y="19" width="8" height="8" />
 		</element>
 
 		<!-- control unit-->
@@ -89,5 +138,21 @@ license:CC0-1.0
 		</repeat>
 
 
+	</group>
+
+	<view name="Internal Layout + Service Keyboard">
+		<bounds left="0" right="110" top="0" bottom="62" />
+		<group ref="machine" />
+		<element ref="static_black">
+			<bounds left="0" right="110" top="50" bottom="62" />
+		</element>
+		<screen index="0">
+			<bounds x="0" y="52" width="110" height="8" />
+		</screen>
+	</view>
+
+	<view name="Internal Layout">
+		<bounds left="0" right="110" top="0" bottom="50" />
+		<group ref="machine" />
 	</view>
 </mamelayout>

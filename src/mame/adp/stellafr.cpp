@@ -98,6 +98,8 @@ Connectors:
 #include "sound/dac.h"
 #include "speaker.h"
 
+#include "servicetastatur.h"
+
 //#define VERBOSE 1
 #include "logmacro.h"
 
@@ -198,14 +200,21 @@ public:
 		m_duart(*this, "duart"),
 		m_nvram(*this, "nvram"),
 		m_dac(*this, "dac"),
-		m_digits(*this, "digit%u", 0U),
+		m_gsg(*this, "gsg"),
+		m_digits(*this, "digit%02u", 0U),
+		m_anzled(*this, "anzled%u", 0U),
+		m_magnet(*this, "magnet%u", 0U),
 		m_lamps(*this, "lamp%u", 0U),
 		m_leds(*this, "led%u", 0U),
-		m_in0(*this, "IN0")
+		m_in0(*this, "IN0"),
+		m_door(*this, "DOOR"),
+		m_svc(*this, "SVC")
 	{ }
 
 	void sus_tk(machine_config &config) ATTR_COLD;
 	void sus_rtc(machine_config &config) ATTR_COLD;
+
+	DECLARE_INPUT_CHANGED_MEMBER(door_changed);
 
 protected:
 	virtual void machine_start() override ATTR_COLD;
@@ -216,26 +225,47 @@ private:
 	required_device<mc68681_device> m_duart;
 	required_device<nvram_device> m_nvram;
 	required_device<ad7224_device> m_dac;
-	output_finder<8> m_digits;
-	output_finder<128> m_lamps;
+	required_device<adp_gsg_port_device> m_gsg;
+	output_finder<154> m_digits; // digit<bank*8+anzout><field>: Anzeigenplatine 4094 chains (bank 1 = 8x)
+	output_finder<5> m_anzled;   // coin-accept LEDs (0,10/1/2/5 DM) + Freispiele
+	output_finder<2> m_magnet;   // magnets L/R
+	output_finder<160> m_lamps;   // lamp<bank*80 + row*10 + column>
 	output_finder<2> m_leds;
 	required_ioport m_in0;
+	required_ioport m_door;
+	required_ioport m_svc;
 
-	uint8_t m_ma1;
-	uint8_t m_ma2;
-	uint8_t m_me;
-	uint8_t m_data3;
-	uint8_t m_anz1;
-	uint16_t m_mux1;
-	uint8_t m_anz2;
-	uint8_t m_mux2;
+	uint16_t m_ma1;
+	uint16_t m_ma2;
+	uint16_t m_me;
+	uint16_t m_data3;
+	uint8_t m_slot;          // read slot within the 16 bit frame
+	uint8_t m_step;          // scan step of the current frame (from the MUX select)
+	int m_reel_pos[8];       // stepper position of each reel motor
+	uint8_t m_reel_g[8];     // last stepper phase (gray code index)
+	uint8_t m_anz[2];        // serial data for the two display banks (ANZ1/ANZ2)
+	uint16_t m_mux[2];       // serial data for the two lamp banks (MUX1/MUX2)
+	uint8_t m_strobe;        // last value of the U5 enable latch
+
+	// the eight downstream 74HC4094s (Anzout 0..7) on the Anzeigenplatine;
+	// each clocks in its Anzout bit on every EnAnz strobe
+	uint16_t m_anz_out[2][8];
+	uint8_t m_anz_half[2];   // which of the two ANZ strobes per scan step (0/1)
+	uint8_t m_anz_cycle[2];  // module pair: 0 = modules 0/1, 1 = modules 2/3
+	uint8_t m_anz_prevpos[2]; // previous scan step (to detect wrap)
 
 	uint8_t mux_r();
+	void enable_w(uint8_t data);
 	void mux_w(uint8_t data);
-	void mux2_w(uint8_t data);
 	void duart_output_w(uint8_t data);
 	void ay8910_portb_w(uint8_t data);
-	void lamps_w(uint8_t row, uint16_t data);
+	void lamps_w(int bank);
+	void reels_update(uint16_t word);
+	bool reel_barrier(int motor) const;
+	void anzeigen_w(int bank);
+	void anzout_digit_w(int bank, int anzout, int even_field);
+	void anzout_aux(int even_field);
+	static uint8_t digit_map(int field, uint8_t s);
 
 	void mem_map_tk(address_map &map) ATTR_COLD;
 	void mem_map_rtc(address_map &map) ATTR_COLD;
@@ -247,9 +277,10 @@ uint8_t stellafr_state::mux_r()
 {
 	bool li = false;
 	bool emp = false;
-	bool ma = false;
-	bool st = false;
-	bool t = false; // main buttons in
+	bool ma = (m_slot < 8) && reel_barrier(m_slot);
+	bool st = m_gsg->data_r(); // OutST from the service keyboard
+	// main buttons in; the service switch sits at step 1, slot 3 (key code 0xdc in the ROM)
+	bool t = (m_slot == 3) && (m_step == 1) && BIT(m_svc->read(), 0);
 	bool t2 = false;
 	bool emp2 = false;
 	bool li2 = false;
@@ -265,65 +296,165 @@ uint8_t stellafr_state::mux_r()
 	if (emp2) data |= (1 << U10_EMP2);
 	if (li2)  data |= (1 << U10_LI2);
 
+	m_slot++;
 	return data;
 }
 
-void stellafr_state::lamps_w(uint8_t row, uint16_t data)
+// Each reel motor is a two phase stepper on two bits of the 1MA frame (motor 0 on the
+// last two bits, latched by EN1MA).  The phases run 00 -> 10 -> 11 -> 01.  The light
+// barrier of motor N is read back on the MA lane in read slot N of the frame.
+void stellafr_state::reels_update(uint16_t word)
 {
-	LOG("Row %d\n",row);
+	static constexpr uint8_t gray[4] = { 0, 3, 1, 2 }; // phase bits -> sequence index
 	for (int i = 0; i < 8; i++)
 	{
-		uint8_t lamp_index = (row * 10) + i;
-		bool lamp_value = BIT(data, i);
-		m_lamps[lamp_index] = lamp_value;
+		uint8_t const g = gray[(word >> (2 * i)) & 3];
+		int const delta = ((g - m_reel_g[i] + 5) & 3) - 1; // -1, 0, +1, +2
+		m_reel_pos[i] += (delta == 2) ? 0 : delta;
+		m_reel_g[i] = g;
 	}
+}
+
+bool stellafr_state::reel_barrier(int motor) const
+{
+	// the firmware only checks that the barrier keeps changing while the motor runs
+	// (it complains after about 12 steps without a change; 3..12 steps per change all pass)
+	static constexpr int STEPS_PER_CHANGE = 6;
+	return ((m_reel_pos[motor] / STEPS_PER_CHANGE) & 1) != 0;
+}
+
+void stellafr_state::lamps_w(int bank)
+{
+	uint8_t const row = (m_mux[bank] >> 12) & 0x07;
+	uint16_t const data = m_mux[bank] & 0x0fff;
+
+	LOG("Row %d\n", row);
+	for (int i = 0; i < 8; i++)
+		m_lamps[(bank * 80) + (row * 10) + i] = BIT(data, i);
+}
+
+uint8_t stellafr_state::digit_map(int field, uint8_t s)
+{
+	// the segment wiring between the shift register and the display differs per module
+	if (field & 1)
+		return bitswap<8>(s, 0, 4, 1, 6, 5, 7, 3, 2); // digits 1 & 3
+	else
+		return bitswap<8>(s, 7, 3, 4, 2, 1, 0, 6, 5); // digits 0 & 2
+}
+
+// Reconstruct the two digits of one Anzout chain: each chain is two 74HC4094s
+// holding two modules. The even field of the pair just latched lives in the low
+// 4094, the odd field in the high one.
+void stellafr_state::anzout_digit_w(int bank, int anzout, int even_field)
+{
+	int const odd_field = even_field | 1;
+	int const base = (bank * 80) + (anzout * 10);
+	uint16_t const v = m_anz_out[bank][anzout];
+	m_digits[base + even_field] = digit_map(even_field, v & 0xff) & 0x7f;
+	m_digits[base + odd_field]  = digit_map(odd_field, v >> 8) & 0x7f;
+}
+
+// Anzout4 chain, high 4094 (module 3 / field 3): coin-accept LEDs + magnets
+void stellafr_state::anzout_aux(int even_field)
+{
+	if (even_field != 2)
+		return;
+
+	uint8_t const aux = m_anz_out[0][4] >> 8;
+	m_anzled[0] = BIT(aux, 0); // 0,10 DM
+	m_anzled[1] = BIT(aux, 1); // 1 DM
+	m_anzled[2] = BIT(aux, 2); // 2 DM
+	m_anzled[3] = BIT(aux, 3); // 5 DM
+	m_magnet[0] = BIT(aux, 4); // Magnet L
+	m_magnet[1] = BIT(aux, 5); // Magnet R
+	// bit 6 = NC
+	m_anzled[4] = BIT(aux, 7); // Freispiele
+}
+
+void stellafr_state::anzeigen_w(int bank)
+{
+	// clock one bit downstream
+	for (int i = 0; i < 8; i++)
+		m_anz_out[bank][i] = (m_anz_out[bank][i] >> 1) | (BIT(m_anz[bank], i) << 15);
+
+	// which module/segment this strobe belongs to, derived from the MUX "lz" select:
+	// after the first strobe it sits in bits 4-7, after the second in bits 12-15
+	int const half = m_anz_half[bank];
+	int const sel = half ? ((m_mux[bank] >> 12) & 0x0f) : ((m_mux[bank] >> 4) & 0x0f);
+	int const pos = 7 - (sel & 0x07);
+	if (half == 0)
+	{
+		if (pos == 0 && m_anz_prevpos[bank] == 7) // select wrap 7->0: next module pair
+			m_anz_cycle[bank] ^= 1;
+		m_anz_prevpos[bank] = pos;
+	}
+
+	if (half == 1 && bank == 0)
+		m_step = pos;
+
+	if (pos == 7 && half == 1)
+	{
+		int const even_field = m_anz_cycle[bank] << 1;
+
+		anzout_digit_w(bank, 0, even_field); // 150er
+		anzout_digit_w(bank, 1, even_field); // usually NC
+		anzout_digit_w(bank, 2, even_field); // usually NC
+		anzout_digit_w(bank, 3, even_field); // Serienspeicher
+		if (bank == 0)
+			anzout_aux(even_field);          // coin-accept LEDs + magnets
+		anzout_digit_w(bank, 5, even_field); // Muenzspeicher
+		anzout_digit_w(bank, 6, even_field); // usually NC
+		anzout_digit_w(bank, 7, even_field); // usually NC
+	}
+
+	m_anz_half[bank] ^= 1; // the two strobes alternate, re-aligned by ENMUX falling
+}
+
+// U5 (written at Y3): enable/strobe lines, acted on at their rising edge
+void stellafr_state::enable_w(uint8_t data)
+{
+	m_slot = 0;
+
+	if (BIT(data, U5_EN1MA) && !BIT(m_strobe, U5_EN1MA))
+		reels_update(m_ma1);
+
+	m_gsg->enable_w(BIT(data, U5_ENANZ1)); // EnST
+
+	static constexpr int enanz[2] = { U5_ENANZ1, U5_ENANZ2 };
+	static constexpr int enmux[2] = { U5_ENMUX1, U5_ENMUX2 };
+
+	for (int bank = 0; bank < 2; bank++)
+	{
+		// ENMUX falls just before the first ANZ strobe of each scan step
+		if (!BIT(data, enmux[bank]) && BIT(m_strobe, enmux[bank]))
+			m_anz_half[bank] = 0;
+
+		if (BIT(data, enmux[bank]) && !BIT(m_strobe, enmux[bank]))
+			lamps_w(bank); // lamps out
+
+		if (BIT(data, enanz[bank]) && !BIT(m_strobe, enanz[bank]))
+			anzeigen_w(bank); // 7seg out (ENANZ1 is shared with the service keyboard enable)
+	}
+
+	// not decoded yet: EN1MA/EN2MA (machine out), AW1/AW2 (coin unit select)
+
+	m_strobe = data;
 }
 
 void stellafr_state::mux_w(uint8_t data)
 {
-	bool enma1  = BIT(data,U5_EN1MA);
-	bool enma2  = BIT(data,U5_EN2MA);
-	bool aw1    = BIT(data,U5_AW1);
-	bool aw2    = BIT(data,U5_AW2);
-	bool enanz1 = BIT(data,U5_ENANZ1); //enable 7seg
-	bool enmux1 = BIT(data,U5_ENMUX1); //enable lamps/buttons
-	bool enanz2 = BIT(data,U5_ENANZ2);
-	bool enmux2 = BIT(data,U5_ENMUX2);
+	m_ma1   = (m_ma1   << 1) | BIT(data, U1_1MA);
+	m_ma2   = (m_ma2   << 1) | BIT(data, U1_2MA);
+	m_me    = (m_me    << 1) | BIT(data, U1_ME);
+	m_data3 = (m_data3 << 1) | BIT(data, U1_D3OUT);
+	// DataST (shared with 1MA) is clocked into the service keyboard by every write
+	m_gsg->data_w(BIT(data, U1_1MA));
+	m_gsg->clock_pulse();
 
-	if (enma1)
-		; // LOG("1MA %d\n",m_ma1);
-	if (enma1)
-		; // LOG("ME %d\n",m_me);
-	if (enma2)
-		; // LOG("2MA %d\n",m_ma2);
-	if (enanz1)
-		; // LOG("ANZ1 %d\n",m_anz1); //main 7seg led out
-	if (enanz1)
-		; // LOG("ST %d\n",m_ma1);
-	if (enmux1)
-		lamps_w((m_mux1 >> 12) & 0x07, m_mux1 & 0x0FFF); //main lamps out
-	if (enanz2)
-		; // LOG("ANZ2 %d\n",m_anz2);
-	if (enmux2)
-		; // LOG("MUX2 %d\n",m_mux2);
-	if (aw1)
-		;
-	if (aw2)
-		;
-}
-
-void stellafr_state::mux2_w(uint8_t data)
-{
-	// anz goes into one 74hc4094
-	// mux has 2 chained for lamp cols 0 - 11, 3 bits for lz encoded and EnSDAp
-	m_ma1   = (m_ma1   << 1) | BIT(data,U1_1MA);
-	m_ma2   = (m_ma2   << 1) | BIT(data,U1_2MA);
-	m_me    = (m_me    << 1) | BIT(data,U1_ME);
-	m_data3 = (m_data3 << 1) | BIT(data,U1_D3OUT);
-	m_anz1  = (m_anz1  << 1) | BIT(data,U1_ANZ1);
-	m_mux1  = (m_mux1  << 1) | BIT(data,U1_MUX1);
-	m_anz2  = (m_anz2  << 1) | BIT(data,U1_ANZ2);
-	m_mux2  = (m_mux2  << 1) | BIT(data,U1_MUX2);
+	m_anz[0] = (m_anz[0] << 1) | BIT(data, U1_ANZ1);
+	m_mux[0] = (m_mux[0] << 1) | BIT(data, U1_MUX1);
+	m_anz[1] = (m_anz[1] << 1) | BIT(data, U1_ANZ2);
+	m_mux[1] = (m_mux[1] << 1) | BIT(data, U1_MUX2);
 }
 
 void stellafr_state::duart_output_w(uint8_t data)
@@ -343,8 +474,8 @@ void stellafr_state::mem_map_tk(address_map &map)
 	map(0x800001, 0x800001).w(m_dac, FUNC(dac_byte_interface::data_w)); // Y0
 	// Y1 device on cpu board
 	// Y2 device on cpu board
-	map(0x8000c1, 0x8000c1).w(FUNC(stellafr_state::mux2_w)); // Y3 SP/ME II out
-	map(0x800100, 0x800101).rw(FUNC(stellafr_state::mux_r), FUNC(stellafr_state::mux_w)); // Y4 SP/ME I out / Inputs
+	map(0x8000c1, 0x8000c1).w(FUNC(stellafr_state::enable_w)); // Y3 U5 enables
+	map(0x800100, 0x800101).rw(FUNC(stellafr_state::mux_r), FUNC(stellafr_state::mux_w)); // Y4 U1 data (shift clock) / Inputs
 	map(0x800141, 0x800141).rw("aysnd", FUNC(ay8910_device::data_r), FUNC(ay8910_device::address_w)); // Y5
 	map(0x800143, 0x800143).w("aysnd", FUNC(ay8910_device::data_w)); // Y5
 	map(0x800180, 0x80019f).rw(m_duart, FUNC(mc68681_device::read), FUNC(mc68681_device::write)).umask16(0x00ff); // Y6
@@ -360,8 +491,8 @@ void stellafr_state::mem_map_rtc(address_map &map)
 	map(0x800001, 0x800001).w(m_dac, FUNC(dac_byte_interface::data_w)); // Y0
 	// Y1 device on cpu board
 	// Y2 device on cpu board
-	map(0x8000c1, 0x8000c1).w(FUNC(stellafr_state::mux2_w)); // Y3 SP/ME II out
-	map(0x800100, 0x800101).rw(FUNC(stellafr_state::mux_r), FUNC(stellafr_state::mux_w)); // Y4 SP/ME I out / Inputs
+	map(0x8000c1, 0x8000c1).w(FUNC(stellafr_state::enable_w)); // Y3 U5 enables
+	map(0x800100, 0x800101).rw(FUNC(stellafr_state::mux_r), FUNC(stellafr_state::mux_w)); // Y4 U1 data (shift clock) / Inputs
 	map(0x800141, 0x800141).rw("aysnd", FUNC(ay8910_device::data_r), FUNC(ay8910_device::address_w)); // Y5
 	map(0x800143, 0x800143).w("aysnd", FUNC(ay8910_device::data_w)); // Y5
 	map(0x800180, 0x80019f).rw(m_duart, FUNC(mc68681_device::read), FUNC(mc68681_device::write)).umask16(0x00ff); // Y6
@@ -376,21 +507,64 @@ void stellafr_state::fc7_map(address_map &map)
 
 void stellafr_state::machine_start()
 {
-	save_item(NAME(m_mux1));
+	save_item(NAME(m_anz));
+	save_item(NAME(m_mux));
+	save_item(NAME(m_strobe));
+	save_item(NAME(m_anz_out));
+	save_item(NAME(m_anz_half));
+	save_item(NAME(m_anz_cycle));
+	save_item(NAME(m_anz_prevpos));
+
+	// DUART inputs on the control unit: SDA/~PFO (IP0), MISFI (IP1), S_IN_DATA (IP3)
+	// are pulled up when idle; IP2 and IP5 are the 921.6 kHz UART_CLOCK
+	m_duart->ip0_w(1);
+	m_duart->ip1_w(1);
+	m_duart->ip2_w(1);
+	m_duart->ip3_w(1);
+	m_duart->ip5_w(1);
 }
 
 void stellafr_state::machine_reset()
 {
-	m_mux1 = 0;
+	m_slot = 0;
+	m_step = 0;
+	std::fill(std::begin(m_reel_pos), std::end(m_reel_pos), 0);
+	std::fill(std::begin(m_reel_g), std::end(m_reel_g), 0);
+	std::fill(std::begin(m_anz), std::end(m_anz), 0);
+	std::fill(std::begin(m_mux), std::end(m_mux), 0);
+	m_strobe = 0;
+	std::fill(std::begin(m_anz_half), std::end(m_anz_half), 0);
+	std::fill(std::begin(m_anz_cycle), std::end(m_anz_cycle), 0);
+	std::fill(std::begin(m_anz_prevpos), std::end(m_anz_prevpos), 0);
+	for (auto &chain : m_anz_out)
+		std::fill(std::begin(chain), std::end(chain), 0);
+
+	// door contact (J21) bridges +12V to IP4 when the door is closed
+	m_duart->ip4_w(m_door->read() & 1);
+}
+
+INPUT_CHANGED_MEMBER(stellafr_state::door_changed)
+{
+	m_duart->ip4_w(newval & 1);
 }
 
 static INPUT_PORTS_START( stellafr )
+	PORT_START("DOOR")
+	PORT_BIT( 0x0001, 0x0001, IPT_OTHER ) PORT_NAME("Door Contact") PORT_TOGGLE PORT_CODE(KEYCODE_D) PORT_CHANGED_MEMBER(DEVICE_SELF, FUNC(stellafr_state::door_changed), 0)
+
+	PORT_START("SVC")
+	PORT_BIT( 0x0001, IP_ACTIVE_HIGH, IPT_OTHER ) PORT_NAME("Service Switch") PORT_CODE(KEYCODE_S)
+
 	PORT_START("IN0")
 	PORT_BIT( 0x0001, IP_ACTIVE_HIGH, IPT_GAMBLE_HIGH ) // Left
 	PORT_BIT( 0x0002, IP_ACTIVE_HIGH, IPT_START )
 	PORT_BIT( 0x0004, IP_ACTIVE_HIGH, IPT_SLOT_STOP1 )
 	PORT_BIT( 0x0008, IP_ACTIVE_HIGH, IPT_SLOT_STOP2 )
 	PORT_BIT( 0x0010, IP_ACTIVE_HIGH, IPT_GAMBLE_LOW ) // Right
+	// the rest of the PSG port A, not assigned to a function yet
+	PORT_BIT( 0x0020, IP_ACTIVE_HIGH, IPT_OTHER ) PORT_NAME("PSG Port A5 (J17 pin 2)")
+	PORT_BIT( 0x0040, IP_ACTIVE_HIGH, IPT_OTHER ) PORT_NAME("PSG Port A6 (DB_RESET, J10 pin 3)")
+	PORT_BIT( 0x0080, IP_ACTIVE_HIGH, IPT_OTHER ) PORT_NAME("PSG Port A7 (door board SIN, J1 pin 4)")
 INPUT_PORTS_END
 
 
@@ -407,6 +581,9 @@ void stellafr_state::sus_tk(machine_config &config)
 	NVRAM(config, m_nvram, nvram_device::DEFAULT_NONE);
 
 	AD7224(config, m_dac, 0);
+
+	// optional service keyboard: -gsg servicet
+	ADP_GSG_PORT(config, m_gsg, adp_gsg_devices, nullptr);
 
 	SPEAKER(config, "mono").front_center();
 	ay8910_device &aysnd(AY8910(config, "aysnd", 1'000'000));
@@ -430,6 +607,9 @@ void stellafr_state::sus_rtc(machine_config &config)
 	MSM6242(config, "rtc", XTAL(32'768));
 
 	AD7224(config, m_dac, 0);
+
+	// optional service keyboard: -gsg servicet
+	ADP_GSG_PORT(config, m_gsg, adp_gsg_devices, nullptr);
 
 	SPEAKER(config, "mono").front_center();
 	ay8910_device &aysnd(AY8910(config, "aysnd", 1'000'000));

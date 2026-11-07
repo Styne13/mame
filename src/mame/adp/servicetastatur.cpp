@@ -40,14 +40,14 @@ ___| XTAL  80C31          +KEYPAD+       |__
 */
 
 #include "emu.h"
-#include "cpu/mcs51/i80c51.h"
-#include "machine/i2cmem.h"
-#include "video/hd44780.h"
+#include "servicetastatur.h"
+
 #include "emupal.h"
 #include "screen.h"
 
 namespace {
 
+// 80C31 port 1
 enum
 {
 	PORT_1_COL0,
@@ -60,6 +60,7 @@ enum
 	PORT_1_NC7
 };
 
+// 80C31 port 3
 enum
 {
 	PORT_3_RXD,
@@ -77,52 +78,328 @@ class servicet_state : public driver_device
 public:
 	servicet_state(const machine_config &mconfig, device_type type, const char *tag) :
 		driver_device(mconfig, type, tag),
-		m_maincpu(*this, "maincpu"),
-		m_i2cmem(*this, "eeprom"),
-		m_lcd(*this, "hd44780"),
-		m_io_keys(*this, "IN%u", 0U)
+		m_kbd(*this, "kbd")
 	{ }
 
 	void servicet(machine_config &config) ATTR_COLD;
 
-protected:
-	virtual void machine_start() override ATTR_COLD;
-	virtual void machine_reset() override ATTR_COLD;
-
 private:
-	uint8_t port1_r();
-	void port1_w(uint8_t data);
-	uint8_t port3_r();
-	void port3_w(uint8_t data);
-	uint8_t bus_r(offs_t offset);
-	void bus_w(offs_t offset, uint8_t data);
-
-	void servicet_data(address_map &map) ATTR_COLD;
-	void servicet_map(address_map &map) ATTR_COLD;
-
-	HD44780_PIXEL_UPDATE(servicet_pixel_update);
-
-	required_device<mcs51_cpu_device> m_maincpu;
-	required_device<i2cmem_device> m_i2cmem;
-	required_device<hd44780_device> m_lcd;
-	required_ioport_array<3> m_io_keys;
-
-	uint8_t m_port1 = 0xff;
-	uint8_t m_port3 = 0xff;
-	uint8_t m_lcd_data = 0;
+	required_device<adp_servicet_device> m_kbd;
 };
 
-void servicet_state::servicet_map(address_map &map)
+void servicet_state::servicet(machine_config &config)
+{
+	// everything lives in the device so the same keyboard can be plugged into a machine
+	ADP_SERVICET(config, m_kbd);
+}
+
+static INPUT_PORTS_START( servicet )
+INPUT_PORTS_END
+
+ROM_START( servicet )
+ROM_END
+
+} // anonymous namespace
+
+
+//**************************************************************************
+//  GSG slot
+//**************************************************************************
+
+DEFINE_DEVICE_TYPE(ADP_GSG_PORT, adp_gsg_port_device, "adp_gsg_port", "ADP GSG Port")
+
+adp_gsg_port_device::adp_gsg_port_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	device_t(mconfig, ADP_GSG_PORT, tag, owner, clock),
+	device_slot_interface(mconfig, *this),
+	m_dev(nullptr)
+{
+}
+
+void adp_gsg_port_device::device_config_complete()
+{
+	m_dev = get_card_device() ? dynamic_cast<device_adp_gsg_interface *>(get_card_device()) : nullptr;
+}
+
+void adp_gsg_port_device::device_start()
+{
+}
+
+void adp_gsg_port_device::data_w(int state)
+{
+	if (m_dev)
+		m_dev->data_in_w(state);
+}
+
+void adp_gsg_port_device::clock_pulse()
+{
+	if (m_dev)
+	{
+		m_dev->clock_w(1);
+		m_dev->clock_w(0);
+	}
+}
+
+void adp_gsg_port_device::enable_w(int state)
+{
+	if (m_dev)
+		m_dev->enable_w(state);
+}
+
+int adp_gsg_port_device::data_r()
+{
+	return m_dev ? m_dev->data_out_r() : 0;
+}
+
+device_adp_gsg_interface::device_adp_gsg_interface(const machine_config &mconfig, device_t &device) :
+	device_interface(device, "adpgsg")
+{
+}
+
+device_adp_gsg_interface::~device_adp_gsg_interface()
+{
+}
+
+void adp_gsg_devices(device_slot_interface &device)
+{
+	device.option_add("servicet", ADP_SERVICET).clock(11'059'200);
+}
+
+
+//**************************************************************************
+//  Service keyboard
+//**************************************************************************
+
+DEFINE_DEVICE_TYPE(ADP_SERVICET, adp_servicet_device, "adp_servicet", "ADP Profitech 3000 Service Keyboard")
+
+adp_servicet_device::adp_servicet_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	device_t(mconfig, ADP_SERVICET, tag, owner, clock),
+	device_adp_gsg_interface(mconfig, *this),
+	m_maincpu(*this, "maincpu"),
+	m_i2cmem(*this, "eeprom"),
+	m_lcd(*this, "hd44780"),
+	m_io_keys(*this, "IN%u", 0U),
+	m_port1(0xff),
+	m_port3(0xff),
+	m_lcd_data(0),
+	m_data_in(0),
+	m_clock(0),
+	m_enable(0),
+	m_rx_shift(0),
+	m_rx_latch(0),
+	m_tx_data(0),
+	m_tx_shift(0)
+{
+}
+
+void adp_servicet_device::device_start()
+{
+	save_item(NAME(m_port1));
+	save_item(NAME(m_port3));
+	save_item(NAME(m_lcd_data));
+	save_item(NAME(m_data_in));
+	save_item(NAME(m_clock));
+	save_item(NAME(m_enable));
+	save_item(NAME(m_rx_shift));
+	save_item(NAME(m_rx_latch));
+	save_item(NAME(m_tx_data));
+	save_item(NAME(m_tx_shift));
+}
+
+void adp_servicet_device::device_reset()
+{
+	m_port1 = 0xff;
+	m_port3 = 0xff;
+	m_lcd_data = 0;
+	m_data_in = 0;
+	m_clock = 0;
+	m_enable = 0;
+	m_rx_shift = 0;
+	m_rx_latch = 0;
+	m_tx_data = 0;
+	m_tx_shift = 0;
+}
+
+
+//-------------------------------------------------
+//  GSG link
+//-------------------------------------------------
+
+void adp_servicet_device::data_in_w(int state)
+{
+	m_data_in = state;
+}
+
+// two chained 74HC4094 take the frame from the machine: the first bit ends up
+// in the last chip, and the keyboard reads D0 = QP7 / D7 = QP0 of each chip
+void adp_servicet_device::clock_w(int state)
+{
+	if (state && !m_clock)
+	{
+		m_rx_shift = (m_rx_shift << 1) | (m_data_in & 1);
+
+		// 74HC165 shifts the byte the CPU left in the latch out to the machine
+		m_tx_shift <<= 1;
+	}
+	m_clock = state;
+}
+
+// EnST stays high while the machine exchanges its 16 bit frame. The 74HC165
+// takes the byte the CPU left in the latch when it rises, the 74HC4094s
+// freeze their outputs when it falls, and that is also when INT1 fires.
+void adp_servicet_device::enable_w(int state)
+{
+	if (state && !m_enable)
+		m_tx_shift = m_tx_data;
+
+	if (!state && m_enable)
+	{
+		m_rx_latch = m_rx_shift;
+
+		m_maincpu->set_input_line(MCS51_INT1_LINE, ASSERT_LINE);
+		m_maincpu->set_input_line(MCS51_INT1_LINE, CLEAR_LINE);
+	}
+	m_enable = state;
+}
+
+int adp_servicet_device::data_out_r()
+{
+	return BIT(m_tx_shift, 7);
+}
+
+
+//-------------------------------------------------
+//  80C31 port handlers
+//-------------------------------------------------
+
+uint8_t adp_servicet_device::port1_r()
+{
+	uint8_t data = m_port1; // start with what was written to port 1
+
+	// key matrix scanning is bidirectional: the CPU drives lines high and checks
+	// if connected lines follow
+
+	// columns (P1.0-P1.2) driven high
+	for (int col = 0; col < 3; col++)
+	{
+		if (BIT(m_port1, col))
+			data |= m_io_keys[col]->read() & 0x70; // row bits (4,5,6)
+	}
+
+	// rows (P1.4-P1.6) driven high
+	for (int row = 0; row < 3; row++)
+	{
+		if (BIT(m_port1, row + 4))
+		{
+			for (int col = 0; col < 3; col++)
+			{
+				if (BIT(m_io_keys[col]->read(), row + 4))
+					data |= 1 << col;
+			}
+		}
+	}
+
+	return data;
+}
+
+void adp_servicet_device::port1_w(uint8_t data)
+{
+	m_port1 = data;
+}
+
+uint8_t adp_servicet_device::port3_r()
+{
+	// SDA comes from the EEPROM
+	return (m_port3 & ~(1 << PORT_3_SDA)) | (m_i2cmem->read_sda() ? (1 << PORT_3_SDA) : 0);
+}
+
+void adp_servicet_device::port3_w(uint8_t data)
+{
+	m_port3 = data;
+
+	m_i2cmem->write_sda(BIT(data, PORT_3_SDA));
+	m_i2cmem->write_scl(BIT(data, PORT_3_SCL));
+}
+
+
+//-------------------------------------------------
+//  external data bus
+//-------------------------------------------------
+
+uint8_t adp_servicet_device::gsg_r(offs_t offset)
+{
+	// the chips are read bit reversed (D0 = QP7), 0x40 holds the byte sent first
+	return bitswap<8>(BIT(offset, 4) ? (m_rx_latch & 0xff) : (m_rx_latch >> 8), 0, 1, 2, 3, 4, 5, 6, 7);
+}
+
+void adp_servicet_device::gsg_w(uint8_t data)
+{
+	m_tx_data = data;
+}
+
+uint8_t adp_servicet_device::bus_r(offs_t offset)
+{
+	uint8_t data = 0xff;
+
+	switch (offset & 0x70)
+	{
+	case 0x40:
+	case 0x50:
+		data = gsg_r(offset);
+		break;
+
+	case 0x70:
+		// LCD: RS = A1, RW = A0
+		if (BIT(offset, 0))
+		{
+			m_lcd->rs_w(BIT(offset, 1));
+			m_lcd->rw_w(1);
+			m_lcd->e_w(1);
+			data = m_lcd->db_r();
+			m_lcd->e_w(0);
+		}
+		else
+		{
+			data = m_lcd_data;
+		}
+		break;
+	}
+
+	return data;
+}
+
+void adp_servicet_device::bus_w(offs_t offset, uint8_t data)
+{
+	switch (offset & 0x70)
+	{
+	case 0x60:
+		gsg_w(data);
+		break;
+
+	case 0x70:
+		if (!BIT(offset, 0))
+		{
+			m_lcd_data = data;
+			m_lcd->rs_w(BIT(offset, 1));
+			m_lcd->rw_w(0);
+			m_lcd->db_w(data);
+			m_lcd->e_w(1);
+			m_lcd->e_w(0);
+		}
+		break;
+	}
+}
+
+void adp_servicet_device::servicet_map(address_map &map)
 {
 	map(0x0000, 0x7fff).rom();
 }
 
-void servicet_state::servicet_data(address_map &map)
+void adp_servicet_device::servicet_data(address_map &map)
 {
-	map(0x0000, 0xffff).rw(FUNC(servicet_state::bus_r), FUNC(servicet_state::bus_w));
+	map(0x0000, 0xffff).rw(FUNC(adp_servicet_device::bus_r), FUNC(adp_servicet_device::bus_w));
 }
 
-static INPUT_PORTS_START( servicet )
+static INPUT_PORTS_START( adp_servicet )
 	PORT_START("IN0") // P1.0
 	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_KEYPAD) PORT_NAME("OK") PORT_CODE(KEYCODE_ENTER)
 	PORT_BIT( 0x20, IP_ACTIVE_HIGH, IPT_KEYPAD) PORT_NAME("F4") PORT_CODE(KEYCODE_F4)
@@ -139,158 +416,35 @@ static INPUT_PORTS_START( servicet )
 	PORT_BIT( 0x40, IP_ACTIVE_HIGH, IPT_KEYPAD) PORT_NAME("F2") PORT_CODE(KEYCODE_F2)
 INPUT_PORTS_END
 
-void servicet_state::machine_start()
+ioport_constructor adp_servicet_device::device_input_ports() const
 {
-	save_item(NAME(m_port1));
-	save_item(NAME(m_port3));
-	save_item(NAME(m_lcd_data));
+	return INPUT_PORTS_NAME(adp_servicet);
 }
 
-void servicet_state::machine_reset()
+ROM_START( adp_servicet )
+	ROM_REGION( 0x8000, "maincpu", 0 )
+	ROM_LOAD( "service_tastatur_v3.3.u3", 0x0000, 0x8000, CRC(8eb161c4) SHA1(d44f3b38e75e1095487893d8b30c4e3212c1a143) )
+
+	ROM_REGION( 0x800, "eeprom", ROMREGION_ERASEFF )
+ROM_END
+
+const tiny_rom_entry *adp_servicet_device::device_rom_region() const
 {
-	m_port1 = 0xff;
-	m_port3 = 0xff;
-	m_lcd_data = 0;
+	return ROM_NAME(adp_servicet);
 }
 
-uint8_t servicet_state::port1_r()
+void adp_servicet_device::device_add_mconfig(machine_config &config)
 {
-	uint8_t data = m_port1; // Start with what was written to port1
+	I80C31(config, m_maincpu, DERIVED_CLOCK(1, 1));
+	m_maincpu->set_addrmap(AS_PROGRAM, &adp_servicet_device::servicet_map);
+	m_maincpu->set_addrmap(AS_DATA, &adp_servicet_device::servicet_data);
 
-	// key matrix scanning seems to be bidirectional
-	// CPU drives each line HIGH and checks if connected lines are also HIGH = button pressed
+	m_maincpu->port_in_cb<1>().set(FUNC(adp_servicet_device::port1_r));
+	m_maincpu->port_out_cb<1>().set(FUNC(adp_servicet_device::port1_w));
+	m_maincpu->port_in_cb<3>().set(FUNC(adp_servicet_device::port3_r));
+	m_maincpu->port_out_cb<3>().set(FUNC(adp_servicet_device::port3_w));
 
-	// Column-to-Row scanning: When columns (P1.0-P1.2) are driven HIGH
-	for (int col = 0; col < 3; col++)
-	{
-		if (BIT(m_port1, col)) // Column is driven HIGH
-		{
-			uint8_t const keys = m_io_keys[col]->read();
-			data |= (keys & 0x70); // Mask to only row bits (4,5,6)
-		}
-	}
-
-	// Row-to-Column scanning: When rows (P1.4-P1.6) are driven HIGH
-	for (int row = 0; row < 3; row++)
-	{
-		if (BIT(m_port1, row + 4)) // Row is driven HIGH (bits 4,5,6)
-		{
-			// Check all columns for this row
-			for (int col = 0; col < 3; col++)
-			{
-				uint8_t const keys = m_io_keys[col]->read();
-				if (BIT(keys, row + 4)) // Key pressed in this row
-				{
-					data |= (1 << col); // Set corresponding column bit HIGH
-				}
-			}
-		}
-	}
-
-	return data;
-}
-
-void servicet_state::port1_w(uint8_t data)
-{
-	m_port1 = data;
-}
-
-uint8_t servicet_state::port3_r()
-{
-	uint8_t data = m_port3;
-
-	uint8_t const sda = m_i2cmem->read_sda();
-
-	// Clear bit 4 (SDA) and insert actual value from EEPROM
-	data = (data & ~(1 << PORT_3_SDA)) | (sda ? (1 << PORT_3_SDA) : 0);
-
-	return data;
-}
-
-void servicet_state::port3_w(uint8_t data)
-{
-	m_port3 = data;
-
-	m_i2cmem->write_sda(BIT(data, PORT_3_SDA));
-	m_i2cmem->write_scl(BIT(data, PORT_3_SCL));
-}
-
-uint8_t servicet_state::bus_r(offs_t offset)
-{
-	uint8_t data = 0xff;
-
-	// LCD is mapped to addresses where A6:A4 = 111 (0x70-0x7f)
-	if ((offset & 0x70) == 0x70)
-	{
-		// RS and RW are A1 and A0
-		bool rs = BIT(offset, 1);
-		bool rw = BIT(offset, 0);
-
-		if (rw)
-		{
-			m_lcd->rs_w(rs);
-			m_lcd->rw_w(1);
-
-			m_lcd->e_w(1);
-			data = m_lcd->db_r();
-			m_lcd->e_w(0);
-		}
-		else
-		{
-			data = m_lcd_data;
-		}
-	}
-	else
-	{
-		//LOG("Bus read: %02X to %04X\n", offset);
-	}
-
-	return data;
-}
-
-void servicet_state::bus_w(offs_t offset, uint8_t data)
-{
-	// LCD is mapped to addresses where A6:A4 = 111 (0x70-0x7f)
-	if ((offset & 0x70) == 0x70)
-	{
-		// RS and RW are A1 and A0
-		bool const rs = BIT(offset, 1);
-		bool const rw = BIT(offset, 0);
-
-		if (!rw)
-		{
-			m_lcd_data = data;
-
-			m_lcd->rs_w(rs);
-			m_lcd->rw_w(0);
-			m_lcd->db_w(data);
-
-			m_lcd->e_w(1);
-			m_lcd->e_w(0);
-		}
-	}
-	else if (offset == 0x4000)
-	{
-		//LOG("GSG write: %02X \n", data, offset);
-	}
-	else
-	{
-		//LOG("Bus write: %02X to %04X\n", data, offset);
-	}
-}
-
-void servicet_state::servicet(machine_config &config)
-{
-	I80C31(config, m_maincpu, 11.0592_MHz_XTAL);
-	m_maincpu->set_addrmap(AS_PROGRAM, &servicet_state::servicet_map);
-	m_maincpu->set_addrmap(AS_DATA, &servicet_state::servicet_data);
-
-	m_maincpu->port_in_cb<1>().set(FUNC(servicet_state::port1_r));
-	m_maincpu->port_out_cb<1>().set(FUNC(servicet_state::port1_w));
-	m_maincpu->port_in_cb<3>().set(FUNC(servicet_state::port3_r));
-	m_maincpu->port_out_cb<3>().set(FUNC(servicet_state::port3_w));
-
-	// I2C EEPROM: 24C16 (2KB) - connected to P3.4 (SDA) and P3.5 (SCL)
+	// 24C16 on P3.4 (SDA) and P3.5 (SCL)
 	I2C_24C16(config, m_i2cmem);
 
 	// LCD4002A
@@ -306,16 +460,7 @@ void servicet_state::servicet(machine_config &config)
 	PALETTE(config, "palette", palette_device::MONOCHROME_INVERTED);
 
 	HD44780(config, m_lcd, 270'000);
-	m_lcd->set_lcd_size(2, 40); // 2 lines, 40 characters
+	m_lcd->set_lcd_size(2, 40);
 }
-
-ROM_START( servicet )
-	ROM_REGION( 0x8000, "maincpu", 0 )
-	ROM_LOAD( "service_tastatur_v3.3.u3", 0x0000, 0x8000, CRC(8eb161c4) SHA1(d44f3b38e75e1095487893d8b30c4e3212c1a143) )
-
-	ROM_REGION(0x800, "eeprom", ROMREGION_ERASEFF)
-ROM_END
-
-} // anonymous namespace
 
 GAME( 1992, servicet, 0, servicet, servicet, servicet_state, empty_init, ROT0, "ADP", u8"Merkur Service Testgerät", MACHINE_NOT_WORKING | MACHINE_NO_SOUND_HW )
