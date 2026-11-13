@@ -78,80 +78,132 @@
       <color red="1" green="1" blue="1" alpha="1"/>
     </disk>
   </element>
-  <element name="rect_kaos">
-    <rect>
+  <element name="rect_kaos" defstate="0">
+    <rect state="0">
+      <bounds x="0" y="0" width="120" height="39.34"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </rect>
+    <rect state="1">
       <bounds x="0" y="0" width="120" height="39.34"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </rect>
   </element>
-  <element name="rect_kvu6">
-    <rect>
+  <element name="rect_kvu6" defstate="0">
+    <rect state="0">
+      <bounds x="0" y="0" width="120" height="40.32"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </rect>
+    <rect state="1">
       <bounds x="0" y="0" width="120" height="40.32"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </rect>
   </element>
-  <element name="rect_2n6y">
-    <rect>
+  <element name="rect_2n6y" defstate="0">
+    <rect state="0">
+      <bounds x="0" y="0" width="120" height="38.71"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </rect>
+    <rect state="1">
       <bounds x="0" y="0" width="120" height="38.71"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </rect>
   </element>
-  <element name="rect_p8jc">
-    <rect>
+  <element name="rect_p8jc" defstate="0">
+    <rect state="0">
+      <bounds x="0" y="0" width="120" height="38.13"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </rect>
+    <rect state="1">
       <bounds x="0" y="0" width="120" height="38.13"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </rect>
   </element>
-  <element name="rect_nm6a">
-    <rect>
+  <element name="rect_nm6a" defstate="0">
+    <rect state="0">
+      <bounds x="0" y="0" width="120" height="39.28"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </rect>
+    <rect state="1">
       <bounds x="0" y="0" width="120" height="39.28"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </rect>
   </element>
-  <element name="rect_e1i3">
-    <rect>
+  <element name="rect_e1i3" defstate="0">
+    <rect state="0">
+      <bounds x="0" y="0" width="120" height="39.32"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </rect>
+    <rect state="1">
       <bounds x="0" y="0" width="120" height="39.32"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </rect>
   </element>
-  <element name="rect_2zxq">
-    <rect>
+  <element name="rect_2zxq" defstate="0">
+    <rect state="0">
+      <bounds x="0" y="0" width="120" height="39.32"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </rect>
+    <rect state="1">
       <bounds x="0" y="0" width="120" height="39.32"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </rect>
   </element>
-  <element name="disk_riu9">
-    <disk>
+  <element name="disk_riu9" defstate="0">
+    <disk state="0">
+      <bounds x="0" y="0" width="56" height="56"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </disk>
+    <disk state="1">
       <bounds x="0" y="0" width="56" height="56"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </disk>
   </element>
-  <element name="disk_x934">
-    <disk>
+  <element name="disk_x934" defstate="0">
+    <disk state="0">
+      <bounds x="0" y="0" width="56" height="56"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </disk>
+    <disk state="1">
       <bounds x="0" y="0" width="56" height="56"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </disk>
   </element>
-  <element name="disk_eapa">
-    <disk>
+  <element name="disk_eapa" defstate="0">
+    <disk state="0">
+      <bounds x="0" y="0" width="56" height="56"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </disk>
+    <disk state="1">
       <bounds x="0" y="0" width="56" height="56"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </disk>
   </element>
-  <element name="disk_h6ad">
-    <disk>
+  <element name="disk_h6ad" defstate="0">
+    <disk state="0">
+      <bounds x="0" y="0" width="56" height="56"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </disk>
+    <disk state="1">
       <bounds x="0" y="0" width="56" height="56"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </disk>
   </element>
-  <element name="disk_fn7r">
-    <disk>
+  <element name="disk_fn7r" defstate="0">
+    <disk state="0">
+      <bounds x="0" y="0" width="56" height="56"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </disk>
+    <disk state="1">
       <bounds x="0" y="0" width="56" height="56"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </disk>
   </element>
-  <element name="disk_ps0c">
-    <disk>
+  <element name="disk_ps0c" defstate="0">
+    <disk state="0">
+      <bounds x="0" y="0" width="56" height="56"/>
+      <color red="0.16" green="0.04" blue="0.03" alpha="1"/>
+    </disk>
+    <disk state="1">
       <bounds x="0" y="0" width="56" height="56"/>
       <color red="0.9647058823529412" green="0.3803921568627451" blue="0.3176470588235294" alpha="1"/>
     </disk>
@@ -361,31 +413,31 @@
     <element name="bg_r_b" ref="rect_5dq7">
       <bounds x="824" y="1144" width="144" height="200"/>
     </element>
-    <element name="led7seg_coin1" ref="led7seg_0xne">
+    <element name="display:digit8" ref="led7seg_0xne">
       <bounds x="736" y="664" width="35.1" height="48"/>
     </element>
-    <element name="led7seg_coin2" ref="led7seg_cbq7">
+    <element name="display:digit7" ref="led7seg_cbq7">
       <bounds x="704" y="664" width="31.59" height="48.38"/>
     </element>
-    <element name="led7seg_coin3" ref="led7seg_8k9u">
+    <element name="display:digit6" ref="led7seg_8k9u">
       <bounds x="672" y="664" width="32.17" height="48.55"/>
     </element>
-    <element name="led7seg_coin4" ref="led7seg_lp1f">
+    <element name="display:digit5" ref="led7seg_lp1f">
       <bounds x="640" y="664" width="31.58" height="48"/>
     </element>
-    <element name="led7seg_xfku" ref="led7seg_xfku">
+    <element name="display:digit2" ref="led7seg_xfku">
       <bounds x="328" y="664" width="34.52" height="49.72"/>
     </element>
-    <element name="led7seg_u5jj" ref="led7seg_u5jj">
+    <element name="display:digit1" ref="led7seg_u5jj">
       <bounds x="304" y="664" width="29.83" height="47.96"/>
     </element>
-    <element name="led7seg_fs42" ref="led7seg_fs42">
+    <element name="display:digit0" ref="led7seg_fs42">
       <bounds x="272" y="664" width="30.41" height="48"/>
     </element>
-    <element name="led7seg_chance2" ref="led7seg_fkcf">
+    <element name="display:digit3" ref="led7seg_fkcf">
       <bounds x="96" y="664" width="24.49" height="41.72"/>
     </element>
-    <element name="led7seg_chance1" ref="led7seg_sh37">
+    <element name="display:digit4" ref="led7seg_sh37">
       <bounds x="120" y="664" width="26.09" height="41.32"/>
     </element>
     <element name="disk_6ls8" ref="disk_6ls8">
